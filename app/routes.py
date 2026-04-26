@@ -22,16 +22,20 @@ def home():
 def predict():
 
     # ----------------------------
-    # 1. Get form data
+    # 1. Get form data + validation
     # ----------------------------
     city = request.form.get('city')
-    bhk = int(request.form.get('bhk'))
-    bathrooms = int(request.form.get('bathrooms'))
-    balconies = int(request.form.get('balconies'))
-    area = float(request.form.get('area'))
-    age = int(request.form.get('age'))
-    amenities = int(request.form.get('amenities'))
+
+    bhk = max(1, int(request.form.get('bhk')))
+    bathrooms = max(1, int(request.form.get('bathrooms')))
+    balconies = max(0, int(request.form.get('balconies')))
+    area = max(100, float(request.form.get('area')))
+    age = max(0, int(request.form.get('age')))
+    amenities = max(0, int(request.form.get('amenities')))
+
+    # budget in lakhs → INR
     budget = float(request.form.get('budget')) * 100000
+
     sort_by = request.form.get('sort', 'match')
 
     # ----------------------------
@@ -40,7 +44,7 @@ def predict():
     city_data = df[df['City'] == city]
 
     if city_data.empty:
-        lat, lon = 28.6139, 77.2090
+        lat, lon = 28.6139, 77.2090  # fallback (Delhi)
     else:
         lat = city_data['Latitude'].mean()
         lon = city_data['Longitude'].mean()
@@ -48,11 +52,13 @@ def predict():
     # ----------------------------
     # 3. Accessibility
     # ----------------------------
-    access_score = calculate_accessibility(city,lat, lon)
+    access_score = calculate_accessibility(city, lat, lon)
+
     # ----------------------------
-    # 4. Input for model
+    # 4. User input (IMPORTANT)
     # ----------------------------
     user_input = {
+        'City': city,   # 🔥 IMPORTANT (for filtering)
         'BHK': bhk,
         'Bathrooms': bathrooms,
         'Balconies': balconies,
@@ -65,7 +71,7 @@ def predict():
     }
 
     # ----------------------------
-    # 5. Prediction
+    # 5. Price Prediction
     # ----------------------------
     price_data = predict_price(user_input)
     predicted_price = price_data["predicted_price"]
@@ -86,24 +92,52 @@ def predict():
     # 7. Recommendations
     # ----------------------------
     recommendations = recommend_properties(user_input, budget)
+
     # ----------------------------
-    # 8. Sorting
+    # 8. EDGE CASE: no results
+    # ----------------------------
+    if len(recommendations) == 0:
+        return render_template(
+            'results.html',
+            price=price_data,
+            results=[],
+            city=city,
+            affordability=round(affordability_score, 2),
+            affordability_label=affordability_label
+        )
+
+    # ----------------------------
+    # 9. SORTING (FIXED PROPERLY)
     # ----------------------------
     if sort_by == "area":
         recommendations = sorted(
             recommendations,
-            key=lambda x: x['CarpetArea_sqft'],
+            key=lambda x: x.get('CarpetArea_sqft', 0),
             reverse=True
         )
-    else:
+
+    elif sort_by == "match":
         recommendations = sorted(
             recommendations,
-            key=lambda x: x['MatchPercent'],
+            key=lambda x: x.get('MatchPercent', 0),
+            reverse=True
+        )
+
+    elif sort_by == "price":
+        recommendations = sorted(
+            recommendations,
+            key=lambda x: x.get('Price_INR', 0)
+        )
+
+    elif sort_by == "affordability":
+        recommendations = sorted(
+            recommendations,
+            key=lambda x: x.get('AffordabilityScore', 0),
             reverse=True
         )
 
     # ----------------------------
-    # 9. Render
+    # 10. Render
     # ----------------------------
     return render_template(
         'results.html',
